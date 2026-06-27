@@ -10,6 +10,7 @@ import { EthereumListener } from "./listeners/ethereum-listener.js";
 import { SorobanListener } from "./listeners/soroban-listener.js";
 import { SolanaListener } from "./listeners/solana-listener.js";
 import { Reconciler } from "./reconciliation/reconciler.js";
+import { StaleCleanupService } from "./services/stale-cleanup.js";
 import { createReadinessChecks } from "./readiness.js";
 
 async function main(): Promise<void> {
@@ -24,6 +25,7 @@ async function main(): Promise<void> {
   const quotes = new QuoteService(log);
 
   const reconciler = new Reconciler(cfg, orders, log);
+  const staleCleanup = new StaleCleanupService(repo, log);
 
   const app = createApp({
     log,
