@@ -1,6 +1,6 @@
 {
   "name": "@wafflefinance/sdk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "TypeScript SDK for the WaffleFinance cross-chain bridge: Ethereum + Soroban HTLC clients, secret utilities, and a shared order state machine.",
   "type": "module",
   "main": "dist/index.js",
