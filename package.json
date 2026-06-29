@@ -70,12 +70,10 @@
   "dependencies": {},
   "pnpm": {
     "overrides": {
-      "vitest": "^3.2.6",
       "minimatch": "^9.0.7",
       "vite": "^6.4.3",
       "ws": "^8.21.0",
-      "serialize-javascript": "^6.0.2",
-      "undici": "^6.27.0"
+      "serialize-javascript": "^6.0.2"
     }
   }
 }
