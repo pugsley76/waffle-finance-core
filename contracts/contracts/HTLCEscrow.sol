@@ -210,11 +210,11 @@ contract HTLCEscrow is IHTLCEscrow, ReentrancyGuard {
             amount: amount,
             safetyDeposit: safetyDeposit,
             hashlock: hashlock,
+            preimageKeccak: bytes32(0),
             timelock: absoluteTimelock,
             createdAt: uint64(block.timestamp),
             finalisedAt: 0,
-            status: OrderStatus.Funded,
-            preimageKeccak: bytes32(0)
+            status: OrderStatus.Funded
         });
 
         emit OrderCreated(

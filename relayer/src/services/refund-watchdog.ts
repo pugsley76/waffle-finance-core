@@ -41,6 +41,7 @@ import {
   watchdogTickDurationSeconds,
 } from '../metrics.js';
 import { sanitizeForLog } from '../utils/sanitize-for-log.js';
+import { PendingStore } from '../utils/pending-store.js';
 
 const DEFAULT_INTERVAL_MS = 60_000;   // 1 minute
 const DEFAULT_STALE_AFTER_MS = 5 * 60_000; // 5 minutes
@@ -82,6 +83,12 @@ export interface WatchdogConfig {
    * The watchdog mutates entries in-place to mark them refunded.
    */
   activeOrders: Map<string, WatchdogOrder>;
+  /**
+   * Optional persistent store for pending actions. When provided,
+   * eligible orders are persisted before the refund attempt so a
+   * relayer restart can resume them rather than drop them.
+   */
+  pendingStore?: PendingStore;
 }
 
 function toMillis(
@@ -111,6 +118,36 @@ export function startRefundWatchdog(config: WatchdogConfig): { stop: () => void 
     ` · refund after ${Math.round(staleAfterMs / 1000)}s` +
     ` · network=${config.networkMode}`
   );
+
+  // On startup, replay any entries that were persisted before the last
+  // restart so they are visible to the scan loop without waiting for
+  // new events to re-populate activeOrders.
+  if (config.pendingStore) {
+    let replayed = 0;
+    for (const [orderId, entry] of config.pendingStore.getAll()) {
+      if (!config.activeOrders.has(orderId)) {
+        config.activeOrders.set(orderId, {
+          orderId,
+          direction: entry.direction,
+          status: entry.status,
+          stellarAddress: entry.stellarAddress,
+          stellarTxHash: entry.stellarTxHash,
+          xlmReceivedAt: entry.xlmReceivedAt,
+          created: entry.created,
+          amount: entry.amount,
+          networkMode: entry.networkMode,
+          refundTxHash: entry.refundTxHash,
+          refundedAt: entry.refundedAt,
+          watchdogFailedAt: entry.watchdogFailedAt,
+          watchdogFailureReason: entry.watchdogFailureReason,
+        });
+        replayed++;
+      }
+    }
+    if (replayed > 0) {
+      console.log(`[refund-watchdog] replayed ${replayed} pending orders from persistent store`);
+    }
+  }
 
   const tick = async (): Promise<void> => {
     const tickEnd = watchdogTickDurationSeconds.startTimer();
@@ -162,6 +199,23 @@ export function startRefundWatchdog(config: WatchdogConfig): { stop: () => void 
             ` stellarTx=${order.stellarTxHash}`
           );
 
+          // Persist the pending action BEFORE attempting the refund so
+          // that a restart mid-flight can resume it rather than drop it.
+          // Private keys are never stored — only the metadata needed to
+          // reconstruct the refund call.
+          config.pendingStore?.upsert({
+            orderId,
+            direction: order.direction ?? 'xlm_to_eth',
+            status: order.status ?? 'pending_refund',
+            stellarAddress: order.stellarAddress,
+            stellarTxHash: order.stellarTxHash,
+            xlmReceivedAt: typeof order.xlmReceivedAt === 'number' ? order.xlmReceivedAt : undefined,
+            created: typeof order.created === 'number' ? order.created : undefined,
+            amount: order.amount ? String(order.amount) : undefined,
+            networkMode: config.networkMode,
+          });
+          config.pendingStore?.incrementAttempts(orderId);
+
           const refund = await refundXlmToUser({
             orderId,
             stellarAddress,
@@ -177,6 +231,9 @@ export function startRefundWatchdog(config: WatchdogConfig): { stop: () => void 
           order.refundedAt = Date.now();
 
           watchdogRefundSuccessTotal.inc({ network_mode: config.networkMode });
+
+          // Remove from persistent store — the action completed.
+          config.pendingStore?.remove(orderId);
 
           console.log(
             `[refund-watchdog] ✅ orderId=${orderId} refunded ${refund.amount} XLM` +

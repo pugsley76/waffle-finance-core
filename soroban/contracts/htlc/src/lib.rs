@@ -140,6 +140,12 @@ enum DataKey {
 fn topic_created() -> Symbol { symbol_short!("created") }
 fn topic_claimed() -> Symbol { symbol_short!("claimed") }
 fn topic_refunded() -> Symbol { symbol_short!("refunded") }
+/// Emitted whenever the admin changes (set_admin). Off-chain monitoring
+/// can track every admin transition to verify the trust model is intact.
+fn topic_admin_changed() -> Symbol { symbol_short!("adm_chng") }
+/// Emitted whenever the resolver registry binding changes. Off-chain
+/// monitoring can verify that create_order gating is not silently altered.
+fn topic_registry_changed() -> Symbol { symbol_short!("reg_chng") }
 
 #[contract]
 pub struct HtlcContract;
@@ -169,18 +175,48 @@ impl HtlcContract {
 
     /// Set or update the resolver registry contract address. Pass
     /// `Option::None` semantics by calling `clear_resolver_registry`.
+    ///
+    /// # Admin responsibility
+    /// Setting a registry enables sybil-resistance for create_order. The
+    /// registry is consulted live on every create_order — changing it
+    /// immediately affects who may create new orders. It NEVER affects
+    /// the ability of existing orders to be claimed or refunded; those
+    /// paths remain permissionless and are not gated by the registry.
+    ///
+    /// A `reg_chng` event is published so off-chain monitors can detect
+    /// unexpected registry swaps.
     pub fn set_resolver_registry(env: Env, registry: Address) {
         Self::require_admin(&env);
+        let old: Option<Address> = env.storage().instance().get(&DataKey::ResolverRegistry);
         env.storage().instance().set(&DataKey::ResolverRegistry, &registry);
+        env.events().publish(
+            (topic_registry_changed(),),
+            (old, Some(registry)),
+        );
     }
 
     /// Remove the resolver registry binding (any address may create orders).
+    ///
+    /// # Admin responsibility
+    /// After calling this, create_order is permissionless. Funds already
+    /// locked in existing orders remain safe — hashlock + timelock still
+    /// govern every movement. A `reg_chng` event is published so
+    /// off-chain monitors can detect the binding removal.
     pub fn clear_resolver_registry(env: Env) {
         Self::require_admin(&env);
+        let old: Option<Address> = env.storage().instance().get(&DataKey::ResolverRegistry);
         env.storage().instance().remove(&DataKey::ResolverRegistry);
+        env.events().publish(
+            (topic_registry_changed(),),
+            (old, Option::<Address>::None),
+        );
     }
 
     /// Update the minimum safety deposit.
+    ///
+    /// # Guard clause
+    /// The new minimum must be non-negative. Existing funded orders are not
+    /// affected — the minimum is only checked at create_order time.
     pub fn set_min_safety_deposit(env: Env, new_minimum: i128) {
         Self::require_admin(&env);
         if new_minimum < 0 {
@@ -190,9 +226,30 @@ impl HtlcContract {
     }
 
     /// Transfer admin role to a new address.
+    ///
+    /// # Guard clause
+    /// `new_admin` must authorise the transfer (require_auth) to prevent
+    /// accidental transfers to an address the recipient does not control.
+    /// An `adm_chng` event is published for off-chain audit.
+    ///
+    /// # Admin responsibility
+    /// The admin can update configuration (registry, min safety deposit).
+    /// The admin can NEVER move locked user funds — claim and refund are
+    /// exclusively gated by hashlock/timelock and are callable by anyone.
     pub fn set_admin(env: Env, new_admin: Address) {
         Self::require_admin(&env);
+        // New admin must also authorise to prevent fat-finger transfers.
+        new_admin.require_auth();
+        let old: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .unwrap_or_else(|| panic_with_error!(&env, Error::NotInitialised));
         env.storage().instance().set(&DataKey::Admin, &new_admin);
+        env.events().publish(
+            (topic_admin_changed(),),
+            (old, new_admin),
+        );
     }
 
     // ---------------------------------------------------------------------

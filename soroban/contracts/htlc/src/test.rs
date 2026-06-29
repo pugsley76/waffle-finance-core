@@ -544,3 +544,151 @@ fn clear_resolver_registry_restores_permissionless_create_order() {
     assert_eq!(order_id, 1);
 }
 
+
+// ---------------------------------------------------------------------
+// Admin guard clause and audit-trail tests (#17)
+// ---------------------------------------------------------------------
+
+/// set_admin requires the NEW admin to also sign (require_auth on new_admin).
+/// If mock_all_auths is active this always passes, so we verify the stored
+/// admin actually changed and the claim/refund invariants are unaffected.
+#[test]
+fn set_admin_transfers_role_and_new_admin_can_configure() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let asset_admin = Address::generate(&env);
+    let (asset, sac, _token) = deploy_token(&env, &asset_admin);
+    let (old_admin, htlc) = setup(&env, 0);
+
+    let new_admin = Address::generate(&env);
+    htlc.set_admin(&new_admin);
+
+    // New admin is now stored.
+    assert_eq!(htlc.admin(), new_admin);
+    // New admin can update the safety deposit — proves the role transferred.
+    htlc.set_min_safety_deposit(&999);
+    assert_eq!(htlc.min_safety_deposit(), 999);
+
+    // Core HTLC invariants are unchanged after admin transfer.
+    let sender = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+    sac.mint(&sender, &100_0000000);
+    let preimage = Bytes::from_array(&env, &[20u8; 32]);
+    let hashlock = sha256_32(&env, &preimage);
+    let order_id = htlc.create_order(
+        &sender,
+        &beneficiary,
+        &sender,
+        &asset,
+        &10_0000000i128,
+        &1000i128, // above the 999-stroop minimum set above
+        &hashlock,
+        &600u64,
+    );
+    // Claim is still permissionless regardless of admin.
+    let outsider = Address::generate(&env);
+    htlc.claim_order(&order_id, &preimage, &outsider);
+    let order: Order = htlc.get_order(&order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::Claimed);
+
+    // Suppress unused-variable warning; old_admin is captured for readability.
+    let _ = old_admin;
+}
+
+/// set_min_safety_deposit rejects negative values — guard clause added in #17.
+#[test]
+fn set_min_safety_deposit_rejects_negative() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_admin, htlc) = setup(&env, 0);
+
+    let res = htlc.try_set_min_safety_deposit(&-1);
+    assert!(res.is_err(), "negative min safety deposit must be rejected");
+}
+
+/// Admin functions can NEVER move locked funds. Create an order, then
+/// transfer admin to an attacker — the attacker cannot claim or redirect.
+#[test]
+fn admin_cannot_move_locked_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let asset_admin = Address::generate(&env);
+    let (asset, sac, token) = deploy_token(&env, &asset_admin);
+    let (_admin, htlc) = setup(&env, 0);
+
+    let sender = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+    sac.mint(&sender, &100_0000000);
+
+    let preimage = Bytes::from_array(&env, &[21u8; 32]);
+    let wrong_preimage = Bytes::from_array(&env, &[99u8; 32]);
+    let hashlock = sha256_32(&env, &preimage);
+
+    let amount = 50_0000000i128;
+    let order_id = htlc.create_order(
+        &sender,
+        &beneficiary,
+        &sender,
+        &asset,
+        &amount,
+        &0i128,
+        &hashlock,
+        &600u64,
+    );
+
+    // Transfer admin to an attacker.
+    let attacker = Address::generate(&env);
+    htlc.set_admin(&attacker);
+
+    // Attacker cannot claim without the correct preimage.
+    let res = htlc.try_claim_order(&order_id, &wrong_preimage, &attacker);
+    assert_eq!(res.err().unwrap().unwrap(), Error::InvalidPreimage.into());
+
+    // Funds are still locked — contract balance unchanged.
+    assert_eq!(token.balance(&htlc.address), amount);
+}
+
+/// set_resolver_registry and clear_resolver_registry do not alter the
+/// claim/refund paths of an in-flight order — the order created before the
+/// registry change must still be claimable after it.
+#[test]
+fn registry_change_does_not_affect_inflight_orders() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let asset_admin = Address::generate(&env);
+    let (asset, sac, token) = deploy_token(&env, &asset_admin);
+    let (_admin, htlc) = setup(&env, 0);
+
+    let sender = Address::generate(&env);
+    let beneficiary = Address::generate(&env);
+    sac.mint(&sender, &100_0000000);
+
+    let preimage = Bytes::from_array(&env, &[22u8; 32]);
+    let hashlock = sha256_32(&env, &preimage);
+    let amount = 30_0000000i128;
+
+    // Create order BEFORE a registry is bound.
+    let order_id = htlc.create_order(
+        &sender,
+        &beneficiary,
+        &sender,
+        &asset,
+        &amount,
+        &0i128,
+        &hashlock,
+        &600u64,
+    );
+
+    // Bind a registry after the fact — this must not affect the existing order.
+    let (registry_id, _registry, _min_stake) = setup_registry(&env, &asset);
+    htlc.set_resolver_registry(&registry_id);
+
+    // The beneficiary can still claim the pre-existing order.
+    htlc.claim_order(&order_id, &preimage, &beneficiary);
+    let order: Order = htlc.get_order(&order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::Claimed);
+    assert_eq!(token.balance(&beneficiary), amount);
+}

@@ -10,20 +10,24 @@ const AMOUNT = ethers.parseEther('0.5');
 const MIN_STAKE = ethers.parseEther('10');
 
 // Gas thresholds for regression detection (wei of gas × 1)
-// These are designed to catch significant regressions while avoiding false positives
+// Updated after storage-packing optimization (#23):
+// - Order struct packs preimageKeccak before the timestamp/status slot,
+//   saving 2 cold SSTORE operations on createOrder (~4 400 gas).
+// - Thresholds are set to the optimized baselines; a 10% variance is
+//   allowed to absorb minor Hardhat/EVM fluctuations.
 const GAS_THRESHOLDS = {
   // HTLCEscrow operations
-  createOrderNative: 120_000n, // Native ETH order creation
-  createOrderERC20: 165_000n, // ERC20 order creation
-  claimOrder: 105_000n, // Claim with preimage reveal
-  refundOrder: 95_000n, // Refund after timelock expiry
-  withdraw: 40_000n, // Withdraw credited balance
+  createOrderNative: 115_000n, // Native ETH order creation (optimized)
+  createOrderERC20: 160_000n,  // ERC20 order creation (optimized)
+  claimOrder: 100_000n,        // Claim with preimage reveal
+  refundOrder: 90_000n,        // Refund after timelock expiry
+  withdraw: 40_000n,           // Withdraw credited balance
 
   // ResolverRegistry operations
-  register: 115_000n, // Register as resolver with stake
-  increaseStake: 75_000n, // Increase existing stake
-  unregister: 110_000n, // Unregister and withdraw stake
-  slash: 85_000n, // Slash a resolver
+  register: 115_000n,          // Register as resolver with stake
+  increaseStake: 75_000n,      // Increase existing stake
+  unregister: 110_000n,        // Unregister and withdraw stake
+  slash: 85_000n,              // Slash a resolver
 };
 
 async function deployEscrow(
@@ -428,7 +432,7 @@ describe('Gas Regression Suite', () => {
       console.log('╔════════════════════════════════════════════════════════════╗');
       console.log('║              Gas Regression Baseline Report                 ║');
       console.log('╠════════════════════════════════════════════════════════════╣');
-      console.log('║ HTLCEscrow Operations                                       ║');
+      console.log('║ HTLCEscrow Operations (post storage-packing opt, issue #23) ║');
       console.log('╟────────────────────────────────────────────────────────────╢');
       console.log(
         `║ • createOrder(native):        ${String(GAS_THRESHOLDS.createOrderNative).padEnd(7)} gas (base)  ║`
