@@ -6,6 +6,8 @@ import { useTransactionHistoryCache, type Transaction } from '../hooks/useTransa
 import { useTransactionHistoryQuery } from '../hooks/useTransactionHistoryQuery';
 import { presentOrderStatus } from '../lib/orderStatusPresentation';
 import type { Address } from 'viem';
+import OrderExport from './OrderExport';
+import OrderImport from './OrderImport';
 
 interface TransactionHistoryProps {
   ethAddress?: string;
@@ -203,6 +205,17 @@ export default function TransactionHistory({ ethAddress, stellarAddress }: Trans
           <RefreshCw className={`h-4 w-4 ${isHistoryBusy ? 'animate-spin' : ''}`} />
           Refresh
         </button>
+      </div>
+
+      {/* Export / Import panel — collapsible, rendered above the filter tabs */}
+      <div className="mb-4 shrink-0 space-y-2">
+        <OrderExport
+          transactions={transactions}
+          apiBase={API_BASE_URL}
+          ethAddress={ethAddress}
+          stellarAddress={stellarAddress}
+        />
+        <OrderImport onMerge={updateTransactions} />
       </div>
 
       <div className="mb-4 flex shrink-0 gap-2 overflow-x-auto pb-1">
