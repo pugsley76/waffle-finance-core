@@ -9,6 +9,27 @@ import type { Address } from 'viem';
 import OrderExport from './OrderExport';
 import OrderImport from './OrderImport';
 
+// ── Status presentation helpers ───────────────────────────────────────────────
+
+function getStatusPresentation(status: Transaction['status']) {
+  return presentOrderStatus(status as Parameters<typeof presentOrderStatus>[0]);
+}
+
+function getStatusIcon(status: Transaction['status']) {
+  const { iconName } = getStatusPresentation(status);
+  switch (iconName) {
+    case 'check-circle': return <CheckCircle className="h-3.5 w-3.5" />;
+    case 'x-circle':     return <XCircle className="h-3.5 w-3.5" />;
+    default:             return <Clock className="h-3.5 w-3.5" />;
+  }
+}
+
+function formatTime(timestamp: number): string {
+  const d = new Date(timestamp);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
 interface TransactionHistoryProps {
   ethAddress?: string;
   stellarAddress?: string;
@@ -37,7 +58,7 @@ export default function TransactionHistory({ ethAddress, stellarAddress }: Trans
     apiBase: API_BASE_URL,
   });
 
-  const { result: { items: filteredTransactions, total }, options, setQuery, setSort } = useTransactionHistoryQuery(transactions);
+  const { result: { items: filteredTransactions, total }, options, setQuery } = useTransactionHistoryQuery(transactions);
 
   const isHistoryBusy = isLoading || isRefreshing;
 

@@ -17,6 +17,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Transaction } from '../hooks/useTransactionHistoryCache';
+import type * as OrderExportImportModule from '../hooks/useOrderExportImport';
 
 // ── Mock the hook so we control all side effects ──────────────────────────────
 
@@ -35,7 +36,7 @@ const mockHook = {
 };
 
 vi.mock('../hooks/useOrderExportImport', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../hooks/useOrderExportImport')>();
+  const actual = await importOriginal<typeof OrderExportImportModule>();
   return {
     ...actual,
     useOrderExportImport: () => mockHook,

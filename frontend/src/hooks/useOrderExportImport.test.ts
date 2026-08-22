@@ -234,7 +234,21 @@ describe('useOrderExportImport — exportTransactions', () => {
     createdUrls = [];
     appendedAnchors = [];
 
-    vi.spyOn(URL, 'createObjectURL').mockImplementation((blob) => {
+    // jsdom does not implement URL.createObjectURL — define a stub so vi.spyOn works
+    if (!URL.createObjectURL) {
+      Object.defineProperty(URL, 'createObjectURL', {
+        writable: true,
+        value: (_blob: Blob) => `blob:fake-stub`,
+      });
+    }
+    if (!URL.revokeObjectURL) {
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        writable: true,
+        value: (_url: string) => undefined,
+      });
+    }
+
+    vi.spyOn(URL, 'createObjectURL').mockImplementation((_blob) => {
       const url = `blob:fake-${createdUrls.length}`;
       createdUrls.push(url);
       return url;

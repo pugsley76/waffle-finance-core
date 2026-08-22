@@ -17,11 +17,12 @@
  *  - Error banner is shown when importError is set
  */
 
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { Transaction } from '../hooks/useTransactionHistoryCache';
 import type { ImportRow, RowValidationError } from '../hooks/useOrderExportImport';
+import type * as OrderExportImportModule from '../hooks/useOrderExportImport';
 
 // ── Mock the hook ─────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ const mockHook = {
   fetchAndExportFromApi: vi.fn(),
   isExporting: false,
   exportError: null,
-  parseImportFile: vi.fn(async (_file: File) => mockParseResult),
+  parseImportFile: vi.fn(),
   confirmImport: vi.fn(() => ({
     imported: [] as Transaction[],
     skipped: 0,
@@ -51,7 +52,7 @@ const mockHook = {
 };
 
 vi.mock('../hooks/useOrderExportImport', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../hooks/useOrderExportImport')>();
+  const actual = await importOriginal<typeof OrderExportImportModule>();
   return {
     ...actual,
     useOrderExportImport: () => mockHook,
@@ -97,6 +98,8 @@ beforeEach(() => {
   mockHook.isImporting = false;
   mockHook.importError = null;
   mockHook.importedStorageBytes.mockReturnValue(0);
+  // Re-establish default implementation after vi.clearAllMocks() wipes it
+  mockHook.parseImportFile.mockImplementation(async (_file: File) => mockParseResult);
   mockHook.confirmImport.mockReturnValue({
     imported: [],
     skipped: 0,
@@ -116,7 +119,8 @@ describe('OrderImport — panel toggle', () => {
   test('panel opens on toggle button click', async () => {
     render(<OrderImport {...DEFAULT_PROPS} />);
     await userEvent.click(screen.getByRole('button', { name: /import orders/i }));
-    expect(screen.getByRole('button', { name: /drop a file/i })).toBeInTheDocument();
+    // The drop zone is a div[role="button"] with accessible label
+    expect(screen.getByRole('button', { name: /upload csv or json/i })).toBeInTheDocument();
   });
 
   test('toggle aria-expanded is updated correctly', async () => {
@@ -330,7 +334,7 @@ describe('OrderImport — success state', () => {
     await userEvent.click(screen.getByRole('button', { name: /import 1 order/i }));
     await userEvent.click(screen.getByRole('button', { name: /import another file/i }));
 
-    expect(screen.getByRole('button', { name: /drop a file/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /upload csv or json/i })).toBeInTheDocument();
   });
 
   test('"Clear imported orders" calls clearImported and resets panel', async () => {
@@ -353,7 +357,7 @@ describe('OrderImport — success state', () => {
     await userEvent.click(screen.getByRole('button', { name: /clear imported orders/i }));
 
     expect(mockHook.clearImported).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: /drop a file/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /upload csv or json/i })).toBeInTheDocument();
   });
 });
 
@@ -402,6 +406,6 @@ describe('OrderImport — "Choose different file" reset', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: /choose different file/i }));
 
-    expect(screen.getByRole('button', { name: /drop a file/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /upload csv or json/i })).toBeInTheDocument();
   });
 });
